@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Biểu đồ đánh giá RAG</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #f4f4f9;
+            margin: 0;
+            padding: 0;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            background: white;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+        }
+        h1 {
+            margin: 0;
+            font-size: 18px;
+        }
+        .btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .container {
+            max-width: 980px;
+            margin: 20px auto;
+            padding: 0 16px 40px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 16px;
+        }
+        .summary {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .pill {
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: #f0f4ff;
+            font-size: 13px;
+        }
+        .notes {
+            font-size: 13px;
+            color: #555;
+            margin-top: 8px;
+        }
+        .small {
+            font-size: 12px;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Biểu đồ đánh giá mô hình</h1>
+        <div>
+            <button class="btn" id="refresh-btn">Làm mới</button>
+            <a class="btn" style="background:#555;margin-left:8px;text-decoration:none;" href="index.html">Quay lại chat</a>
+        </div>
+    </header>
+    <div class="container">
+        <div class="card summary" id="summary">
+            <div class="pill" id="total">Tổng: --</div>
+            <div class="pill" id="avg-rag">RAG relevance TB: --</div>
+            <div class="pill" id="avg-acc">Accuracy TB: --</div>
+            <div class="pill" id="halluc">Tỉ lệ hallucination: --</div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <canvas id="lineChart"></canvas>
+                <div class="small">Chỉ lấy các mục evaluation status = ok.</div>
+            </div>
+            <div class="card">
+                <canvas id="barChart"></canvas>
+            </div>
+        </div>
+        <div class="card">
+            <div class="notes" id="notes"></div>
+        </div>
+    </div>
+
+    <script>
+        const lineCtx = document.getElementById('lineChart').getContext('2d');
+        const barCtx = document.getElementById('barChart').getContext('2d');
+        const notesDiv = document.getElementById('notes');
+
+        let lineChart;
+        let barChart;
+
+        async function loadMetrics() {
+            const res = await fetch('http://localhost:5000/metrics');
+            const data = await res.json();
+            const items = data.data || [];
+            const okItems = items.filter(m => (m.evaluation || {}).status === 'ok');
+
+            // Summary
+            document.getElementById('total').innerText = `Tổng: ${items.length}`;
+            document.getElementById('avg-rag').innerText = `RAG relevance TB: ${(data.summary?.avg_rag_relevance || 0).toFixed(2)}`;
+            document.getElementById('avg-acc').innerText = `Accuracy TB: ${(data.summary?.avg_answer_accuracy || 0).toFixed(2)}`;
+            document.getElementById('halluc').innerText = `Tỉ lệ hallucination: ${((data.summary?.hallucination_rate || 0) * 100).toFixed(1)}%`;
+
+            const labels = okItems.map((m, idx) => m.evaluation.timestamp || `#${idx + 1}`);
+            const ragRel = okItems.map(m => m.evaluation.rag_relevance);
+            const acc = okItems.map(m => m.evaluation.answer_accuracy);
+            const halluc = okItems.map(m => m.evaluation.hallucination ? 1 : 0);
+
+            if (lineChart) lineChart.destroy();
+            lineChart = new Chart(lineCtx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'RAG relevance',
+                            data: ragRel,
+                            borderColor: '#007bff',
+                            backgroundColor: 'rgba(0,123,255,0.1)',
+                            tension: 0.25
+                        },
+                        {
+                            label: 'Answer accuracy',
+                            data: acc,
+                            borderColor: '#28a745',
+                            backgroundColor: 'rgba(40,167,69,0.1)',
+                            tension: 0.25
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: { min: 0, max: 1 }
+                    }
+                }
+            });
+
+            if (barChart) barChart.destroy();
+            barChart = new Chart(barCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['Hallucination', 'Không hallucination'],
+                    datasets: [{
+                        label: 'Số câu trả lời',
+                        data: [halluc.filter(Boolean).length, halluc.filter(v => !v).length],
+                        backgroundColor: ['#ff7a59', '#28a745']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    indexAxis: 'y'
+                }
+            });
+
+            // Notes list (recent)
+            const recent = okItems.slice(-5).reverse();
+            if (!recent.length) {
+                notesDiv.innerText = 'Chưa có dữ liệu đánh giá hợp lệ.';
+            } else {
+                notesDiv.innerHTML = recent.map(m => `• ${m.evaluation.timestamp}: ${m.evaluation.notes || 'Không ghi chú.'}`).join('<br>');
+            }
+        }
+
+        document.getElementById('refresh-btn').addEventListener('click', loadMetrics);
+        loadMetrics();
+    </script>
+</body>
+</html>

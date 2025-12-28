@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple OpenAI Chat UI</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            justify-content: center;
+            background: #f4f4f9;
+        }
+
+        .chat-container {
+            width: 400px;
+            height: 600px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            margin-top: 50px;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid #ddd;
+            background: #fafafa;
+        }
+
+        .title {
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .metrics-link {
+            text-decoration: none;
+            color: white;
+            background: #ff7a59;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        #chat-box {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .message {
+            padding: 8px 12px;
+            border-radius: 15px;
+            max-width: 80%;
+            font-size: 14px;
+        }
+
+        .user {
+            align-self: flex-end;
+            background: #007bff;
+            color: white;
+        }
+
+        .assistant {
+            align-self: flex-start;
+            background: #e9e9eb;
+            color: #333;
+        }
+
+        .input-area {
+            padding: 10px;
+            display: flex;
+            gap: 5px;
+        }
+
+        input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            outline: none;
+        }
+
+        button {
+            padding: 10px 15px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background: #ccc;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="chat-container">
+        <div class="top-bar">
+            <div class="title">Vietnam Heritage Chat</div>
+            <a class="metrics-link" href="metrics.html" target="_blank">Xem biểu đồ</a>
+        </div>
+        <div id="chat-box"></div>
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="Nhập tin nhắn..." autocomplete="off">
+            <button id="send-btn">Gửi</button>
+        </div>
+    </div>
+
+    <script>
+        const chatBox = document.getElementById('chat-box');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        // Mảng lưu trữ lịch sử theo chuẩn OpenAI
+        let messages = [
+            { "role": "system", "content": "Bạn là một trợ lý ảo hữu ích." }
+        ];
+
+        function appendMessage(role, content) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${role}`;
+            msgDiv.innerText = content;
+            chatBox.appendChild(msgDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const text = userInput.value.trim();
+            if (!text) return;
+
+            // 1. Hiển thị tin nhắn người dùng lên UI & thêm vào mảng messages
+            appendMessage('user', text);
+            messages.push({ "role": "user", "content": text });
+            userInput.value = '';
+            sendBtn.disabled = true;
+
+            try {
+                // 2. Gọi API đến localhost:5000
+                const response = await fetch('http://localhost:5000/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: "gpt-3.5-turbo", // Hoặc model bạn đang chạy ở local
+                        messages: messages,
+                        temperature: 0.7
+                    })
+                });
+
+                const data = await response.json();
+
+                // 3. Lấy phản hồi từ trợ lý (assistant)
+                const assistantMessage = data.choices[0].message;
+                appendMessage('assistant', assistantMessage.content);
+
+                // 4. Lưu phản hồi vào lịch sử để chat tiếp
+                messages.push(assistantMessage);
+
+            } catch (error) {
+                console.error('Lỗi:', error);
+                appendMessage('assistant', 'Lỗi: Không thể kết nối đến Server.');
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+
+</body>
+
+</html>
