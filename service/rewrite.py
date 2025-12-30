@@ -18,20 +18,20 @@ client = Groq(api_key=groq_api_key)
 class QueryRewriter:
     def __init__(self, model_name="AITeamVN/Vi-Qwen2-7B-RAG"):
         print(f"⏳ Đang tải LLM {model_name} (khoảng 1-2 phút)...")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        # Cấu hình 4-bit
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_use_double_quant=True,
-        )
-        # Load model ở chế độ float16 để tiết kiệm VRAM và chạy nhanh trên T4 GPU
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=torch.float16,
-            device_map="auto"
-        )
-        print("✅ Đã tải xong LLM.")
+        # self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        # # Cấu hình 4-bit
+        # bnb_config = BitsAndBytesConfig(
+        #     load_in_4bit=True,
+        #     bnb_4bit_compute_dtype=torch.float16,
+        #     bnb_4bit_use_double_quant=True,
+        # )
+        # # Load model ở chế độ float16 để tiết kiệm VRAM và chạy nhanh trên T4 GPU
+        # self.model = AutoModelForCausalLM.from_pretrained(
+        #     model_name,
+        #     torch_dtype=torch.float16,
+        #     device_map="auto"
+        # )
+        # print("✅ Đã tải xong LLM.")
 
     def keyword(self, long_query,his):
         """Dùng LLM để tóm tắt query dài thành keyword tìm kiếm"""
@@ -331,43 +331,43 @@ class QueryRewriter:
     """
 
         # pull model
-        messages = [
-                {"role": "system", "content": RAG_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content}
-            ]
-
-        # Format prompt theo chuẩn của Qwen
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
-
-        # Đưa input vào đúng device của model_base
-        model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
-
-        # --- SỬA LỖI TẠI ĐÂY ---
-        # Dùng model_base (Qwen) thay vì model (SentenceTransformer)
-        generated_ids = self.model.generate(
-            **model_inputs,  # Lưu ý: sửa cả tên biến input cho khớp (model_inputs thay vì model_base1 cho rõ nghĩa)
-            max_new_tokens=512,
-            temperature=0.1, 
-            top_p=0.9
-        )
-
-        generated_ids = [
-            output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-        ]
-
-        answer_bot = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-        
-        # completion = client.chat.completions.create(
-        #     model="meta-llama/llama-4-scout-17b-16e-instruct",
-        #     messages = [
+        # messages = [
         #         {"role": "system", "content": RAG_SYSTEM_PROMPT},
         #         {"role": "user", "content": user_content}
         #     ]
+
+        # # Format prompt theo chuẩn của Qwen
+        # text = self.tokenizer.apply_chat_template(
+        #     messages,
+        #     tokenize=False,
+        #     add_generation_prompt=True
         # )
-        # answer_bot = completion.choices[0].message.content.strip()
+
+        # # Đưa input vào đúng device của model_base
+        # model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+
+        # # --- SỬA LỖI TẠI ĐÂY ---
+        # # Dùng model_base (Qwen) thay vì model (SentenceTransformer)
+        # generated_ids = self.model.generate(
+        #     **model_inputs,  # Lưu ý: sửa cả tên biến input cho khớp (model_inputs thay vì model_base1 cho rõ nghĩa)
+        #     max_new_tokens=512,
+        #     temperature=0.1, 
+        #     top_p=0.9
+        # )
+
+        # generated_ids = [
+        #     output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+        # ]
+
+        # answer_bot = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        
+        completion = client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages = [
+                {"role": "system", "content": RAG_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content}
+            ]
+        )
+        answer_bot = completion.choices[0].message.content.strip()
         return self.chain_of_thought(q_rewrite,answer_bot)
         #return completion.choices[0].message.content.strip() 
