@@ -1,4 +1,6 @@
 from groq import Groq
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from reranking import advanced_search
 import os
 from dotenv import load_dotenv
@@ -14,21 +16,21 @@ if not groq_api_key:
 client = Groq(api_key=groq_api_key)
 
 class QueryRewriter:
-    def __init__(self, model_name="Qwen/Qwen2.5-3B-Instruct"):
+    def __init__(self, model_name="AITeamVN/Vi-Qwen2-7B-RAG"):
         print(f"⏳ Đang tải LLM {model_name} (khoảng 1-2 phút)...")
-        # self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        # # Cấu hình 4-bit
-        # bnb_config = BitsAndBytesConfig(
-        #     load_in_4bit=True,
-        #     bnb_4bit_compute_dtype=torch.float16,
-        #     bnb_4bit_use_double_quant=True,
-        # )
-        # # Load model ở chế độ float16 để tiết kiệm VRAM và chạy nhanh trên T4 GPU
-        # self.model = AutoModelForCausalLM.from_pretrained(
-        #     model_name,
-        #     torch_dtype=torch.float16,
-        #     device_map="auto"
-        # )
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        # Cấu hình 4-bit
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+        )
+        # Load model ở chế độ float16 để tiết kiệm VRAM và chạy nhanh trên T4 GPU
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16,
+            device_map="auto"
+        )
         print("✅ Đã tải xong LLM.")
 
     def keyword(self, long_query,his):
@@ -151,6 +153,7 @@ class QueryRewriter:
           - Nếu câu hỏi có nội dung mang tính tìm hiểu thêm (ví dụ: còn gì khác, thêm, ngoài ra, v.v...), hãy giữ nguyên ý đó.
           - TUYỆT ĐỐI KHÔNG trả lời câu hỏi.
           - Chỉ trả về 1 dòng kết quả là câu hỏi đã được viết lại.
+          - CHỈ TRẢ LỜI BẰNG TIẾNG VIỆT CÓ DẤU.
 
           VÍ DỤ MẪU:
           ---
@@ -257,13 +260,13 @@ class QueryRewriter:
         -   **Xử lý trường hợp không có thông tin**: Nếu sau khi lọc, câu trả lời không còn thông tin nào liên quan, hãy trả lời rằng: "Xin lỗi, tôi không tìm thấy thông tin về vấn đề này trong tài liệu được cung cấp."
         -   **Không thêm thông tin mới**: Chỉ làm việc với những gì đã có trong "Câu trả lời được tạo ra".
         - Trả lời bằng tiếng Việt, văn phong lịch sự, rõ ràng.
+        - CHỈ ĐƯA RA CÂU TRẢ LỜI CUỐI CÙNG, KHÔNG GIẢI THÍCH.
 
         VÍ DỤ:
         ---
         Câu hỏi gốc: "Kể cho tôi về các địa điểm ở Đà Nẵng."
         Câu trả lời được tạo ra: "Đà Nẵng có Bán đảo Sơn Trà và Cầu Rồng. Ngoài ra, Hà Nội cũng có Hồ Gươm rất đẹp."
-        Output (Câu trả lời đã lọc): "Đà Nẵng có các địa điểm nổi tiếng như Bán đảo Sơn Trà và Cầu Rồng."
-        (Giải thích: Thông tin về "Hồ Gươm" ở Hà Nội đã bị loại bỏ vì không liên quan đến Đà Nẵng).
+        Output: "Đà Nẵng có các địa điểm nổi tiếng như Bán đảo Sơn Trà và Cầu Rồng."
         ---
         """
         user_content = f"""### Câu hỏi:
@@ -316,7 +319,7 @@ class QueryRewriter:
         QUY TẮC BẮT BUỘC:
         - TUYỆT ĐỐI KHÔNG sử dụng kiến thức bên ngoài ngữ cảnh.
         - Nếu không có thông tin trong ngữ cảnh, hãy trả lời: "Xin lỗi, tôi không tìm thấy thông tin về vấn đề này trong tài liệu được cung cấp."
-        - Trả lời bằng tiếng Việt, văn phong lịch sự, rõ ràng.
+        - Trả lời bằng tiếng Việt có dấu, văn phong lịch sự, rõ ràng.
         """
             
         # Tạo nội dung user prompt: Ghép context và câu hỏi gốc
@@ -328,43 +331,43 @@ class QueryRewriter:
     """
 
         # pull model
-        # messages = [
-        #         {"role": "system", "content": RAG_SYSTEM_PROMPT},
-        #         {"role": "user", "content": user_content}
-        #     ]
-
-        # # Format prompt theo chuẩn của Qwen
-        # text = tokenizer.apply_chat_template(
-        #     messages,
-        #     tokenize=False,
-        #     add_generation_prompt=True
-        # )
-
-        # # Đưa input vào đúng device của model_base
-        # model_inputs = tokenizer([text], return_tensors="pt").to(model_base.device)
-
-        # # --- SỬA LỖI TẠI ĐÂY ---
-        # # Dùng model_base (Qwen) thay vì model (SentenceTransformer)
-        # generated_ids = model_base.generate(
-        #     **model_inputs,  # Lưu ý: sửa cả tên biến input cho khớp (model_inputs thay vì model_base1 cho rõ nghĩa)
-        #     max_new_tokens=512,
-        #     temperature=0.1, 
-        #     top_p=0.9
-        # )
-
-        # generated_ids = [
-        #     output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-        # ]
-
-        # response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-        
-        completion = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages = [
+        messages = [
                 {"role": "system", "content": RAG_SYSTEM_PROMPT},
                 {"role": "user", "content": user_content}
             ]
+
+        # Format prompt theo chuẩn của Qwen
+        text = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
         )
-        answer_bot = completion.choices[0].message.content.strip()
+
+        # Đưa input vào đúng device của model_base
+        model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+
+        # --- SỬA LỖI TẠI ĐÂY ---
+        # Dùng model_base (Qwen) thay vì model (SentenceTransformer)
+        generated_ids = self.model.generate(
+            **model_inputs,  # Lưu ý: sửa cả tên biến input cho khớp (model_inputs thay vì model_base1 cho rõ nghĩa)
+            max_new_tokens=512,
+            temperature=0.1, 
+            top_p=0.9
+        )
+
+        generated_ids = [
+            output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+        ]
+
+        answer_bot = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        
+        # completion = client.chat.completions.create(
+        #     model="meta-llama/llama-4-scout-17b-16e-instruct",
+        #     messages = [
+        #         {"role": "system", "content": RAG_SYSTEM_PROMPT},
+        #         {"role": "user", "content": user_content}
+        #     ]
+        # )
+        # answer_bot = completion.choices[0].message.content.strip()
         return self.chain_of_thought(q_rewrite,answer_bot)
         #return completion.choices[0].message.content.strip() 
