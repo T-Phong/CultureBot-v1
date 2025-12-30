@@ -245,15 +245,16 @@ class QueryRewriter:
         return hypothetical_answer
 
     def chain_of_thought(self,question,ans):
-        COT_SYSTEM_PROMPT = """Bạn là một trợ lý AI chuyên biên tập và kiểm tra tính liên quan của câu trả lời (Relevance-Checking Editor).
+        COT_SYSTEM_PROMPT = """Bạn là một trợ lý AI chuyên biên tập và kiểm tra tính liên quan của câu trả lời (Relevance-Checking Editor) chuyên về văn hoá, lịch sử và địa điểm Việt Nam.
         NHIỆM VỤ CỐT LÕI: Dựa vào "Câu hỏi gốc", hãy lọc lại "Câu trả lời được tạo ra" để đảm bảo mọi thông tin trong câu trả lời cuối cùng đều liên quan trực tiếp đến chủ thể trong câu hỏi.
 
         HƯỚNG DẪN XỬ LÝ:
-        1.  **Xác định chủ thể chính**: Đọc kỹ "Câu hỏi gốc" để xác định đối tượng, địa danh, hoặc khái niệm chính mà người dùng đang hỏi.
-        2.  **Kiểm tra và lọc**: Rà soát từng câu, từng ý trong "Câu trả lời được tạo ra".
+        1.  **Nếu câu trả lời mang ý nghĩa xã giao (chào hỏi, cảm ơn, v.v...) hoặc tôi không tìm thấy thông tin về vấn đề này trong tài liệu được cung cấp. **, hãy trả về nguyên văn câu trả lời ban đầu mà không chỉnh sửa gì.
+        2.  **Xác định chủ thể chính**: Đọc kỹ "Câu hỏi gốc" để xác định đối tượng, địa danh, hoặc khái niệm chính mà người dùng đang hỏi.
+        3.  **Kiểm tra và lọc**: Rà soát từng câu, từng ý trong "Câu trả lời được tạo ra".
             *   **Giữ lại**: Chỉ giữ lại những thông tin mô tả, giải thích, hoặc liệt kê các chi tiết liên quan đến chủ thể chính của câu hỏi.
             *   **Loại bỏ**: Xóa bỏ hoàn toàn bất kỳ thông tin nào nói về một chủ thể khác, không liên quan.
-        3.  **Tổng hợp lại**: Viết lại câu trả lời cuối cùng một cách mạch lạc, tự nhiên từ những thông tin đã được lọc.
+        4.  **Tổng hợp lại**: Viết lại câu trả lời cuối cùng một cách mạch lạc, tự nhiên từ những thông tin đã được lọc.
 
         QUY TẮC BẮT BUỘC:
         -   **Tập trung vào sự liên quan**: Nếu câu hỏi về "Đà Nẵng", câu trả lời cuối cùng TUYỆT ĐỐI không được chứa thông tin về "Hà Nội" hay "Hải Phòng", dù cho "Câu trả lời được tạo ra" ban đầu có chứa chúng.
@@ -267,6 +268,11 @@ class QueryRewriter:
         Câu hỏi gốc: "Kể cho tôi về các địa điểm ở Đà Nẵng."
         Câu trả lời được tạo ra: "Đà Nẵng có Bán đảo Sơn Trà và Cầu Rồng. Ngoài ra, Hà Nội cũng có Hồ Gươm rất đẹp."
         Output: "Đà Nẵng có các địa điểm nổi tiếng như Bán đảo Sơn Trà và Cầu Rồng."
+        ---
+        ---
+        Câu hỏi gốc: "Viết hàm cộng 2 phân số"
+        Câu trả lời được tạo ra: "Xin lỗi, tôi không tìm thấy thông tin về vấn đề này trong tài liệu được cung cấp."
+        Output: "Xin lỗi, tôi không tìm thấy thông tin về vấn đề này trong tài liệu được cung cấp."
         ---
         """
         user_content = f"""### Câu hỏi:
