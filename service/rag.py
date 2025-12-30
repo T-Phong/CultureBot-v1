@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer
 from datasets import load_dataset, load_from_disk
 from huggingface_hub import snapshot_download
 from typing import List, Dict, Any, Optional
-
+from huggingface_hub import hf_hub_download
 from helper import format_metadata_list_to_context
 
 # ==============================================================================
@@ -15,7 +15,7 @@ from helper import format_metadata_list_to_context
 class HuggingFaceRAGService:
     _instance: Optional['HuggingFaceRAGService'] = None
     
-    # Singleton Pattern: Đảm bảo chỉ có một instance của lớp này được tạo ra
+    # Singleton Pattern
     def __new__(cls):
         if cls._instance is None:
             print("Khởi tạo HuggingFaceRAGService...")
@@ -27,67 +27,107 @@ class HuggingFaceRAGService:
         if self._initialized:
             return
         
-        # Cấu hình
+        # --- CẤU HÌNH ---
         self.MODEL_NAME = "all-MiniLM-L6-v2"
-        self.DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-        self.FAISS_PATH = os.path.join(self.DATA_DIR, "heritage.faiss")
-        self.METADATA_PATH = os.path.join(self.DATA_DIR, "metadata.json")
-        self.IDS_PATH = os.path.join(self.DATA_DIR, "ids.json")
         
-        # Tải model và dữ liệu
+        # ID của Repo trên Hugging Face chứa file index và data
+        # Bạn cần đảm bảo đã upload file .faiss và .json lên repo này (dạng Dataset hoặc Model)
+        self.HF_REPO_ID = "synguyen1106/vietnam_heritage_embeddings_v4"
+        self.HF_REPO_TYPE = "dataset" # Hoặc "model" hoặc "space" tùy nơi bạn để file
+        
+        # Tên file trên repo HF
+        self.FILENAME_INDEX = "heritage.faiss"
+        self.FILENAME_META = "metadata.json"
+        # self.FILENAME_IDS = "ids.json" # Nếu bạn gộp vào metadata thì ko cần file này
+        
+        # Load model & Data
         self._load_model()
         self._load_data()
+        
         self._initialized = True
         print("✅ HuggingFaceRAGService đã sẵn sàng.")
 
     def _load_model(self):
-        print(f"🤖 [HF RAG] Đang tải model: {self.MODEL_NAME}...")
+        print(f"🤖 [HF RAG] Đang tải model embedding: {self.MODEL_NAME}...")
         self.model = SentenceTransformer(self.MODEL_NAME)
 
     def _load_data(self):
-        self.index, self.metadata, self.ids = self._load_cache()
-        if self.index and self.metadata and self.ids:
-            print(f"💾 [HF RAG] Sử dụng cache FAISS index và metadata (items: {len(self.ids)})")
-        else:
-            print("💾 [HF RAG] Cache không tồn tại. Tải dataset và xây dựng FAISS index...")
-            dataset = load_dataset("synguyen1106/vietnam_heritage_embeddings_v4", split="train")
-            vectors = np.array(dataset['embedding']).astype("float32")
-            self.metadata = [{k: v for k, v in dataset[i].items() if k not in ['embedding', 'id', 'slug']} for i in range(len(dataset))]
-            self.ids = [dataset[i]['id'] for i in range(len(dataset))]
-            print(f"💾 [HF RAG] Đã tải {len(self.ids)} mục từ dataset.")
+        """
+        Chiến lược:
+        1. Cố gắng tải file index đã build sẵn từ Hugging Face (Nhanh, tránh lỗi LFS).
+        2. Nếu không tìm thấy file trên HF, fallback về việc tải Dataset gốc và build lại index (Chậm hơn).
+        """
+        try:
+            print(f"⬇️ [HF RAG] Đang thử tải Index pre-built từ HF Hub: {self.HF_REPO_ID}...")
             
-            d = vectors.shape[1]
-            self.index = faiss.IndexFlatL2(d)
-            self.index.add(vectors)
-            print("🔨 [HF RAG] Số lượng vector trong FAISS index:", self.index.ntotal)
+            # 1. Tải file FAISS Index
+            # hf_hub_download sẽ tự xử lý caching và LFS pointer
+            index_path = hf_hub_download(
+                repo_id=self.HF_REPO_ID,
+                filename=self.FILENAME_INDEX,
+                repo_type=self.HF_REPO_TYPE
+            )
             
-            self._save_cache(self.index, self.metadata, self.ids)
-            print(f"💾 [HF RAG] Đã lưu cache tại: {self.FAISS_PATH}")
+            # 2. Tải file Metadata
+            metadata_path = hf_hub_download(
+                repo_id=self.HF_REPO_ID,
+                filename=self.FILENAME_META,
+                repo_type=self.HF_REPO_TYPE
+            )
 
-    def _save_cache(self, faiss_index, metadata_list, ids_list):
-        os.makedirs(self.DATA_DIR, exist_ok=True)
-        faiss.write_index(faiss_index, self.FAISS_PATH)
-        with open(self.METADATA_PATH, "w", encoding="utf-8") as f:
-            json.dump(metadata_list, f, ensure_ascii=False)
-        with open(self.IDS_PATH, "w", encoding="utf-8") as f:
-            json.dump(ids_list, f, ensure_ascii=False)
+            # 3. Load vào RAM
+            print(f"📂 [HF RAG] Đang đọc file index từ: {index_path}")
+            self.index = faiss.read_index(index_path)
+            
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                self.metadata = json.load(f)
+                
+            print(f"✅ [HF RAG] Load thành công từ Cache HF! (Items: {self.index.ntotal})")
 
-    def _load_cache(self):
-        if not (os.path.exists(self.FAISS_PATH) and os.path.exists(self.METADATA_PATH) and os.path.exists(self.IDS_PATH)):
-            return None, None, None
-        idx = faiss.read_index(self.FAISS_PATH)
-        with open(self.METADATA_PATH, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-        with open(self.IDS_PATH, "r", encoding="utf-8") as f:
-            ids_local = json.load(f)
-        return idx, meta, ids_local
+        except Exception as e:
+            print(f"⚠️ [HF RAG] Không tải được pre-built index ({e}). \n🔄 Chuyển sang build từ Dataset gốc...")
+            self._build_from_dataset()
+
+    def _build_from_dataset(self):
+        """
+        Hàm fallback: Tải dataset thô và build index tại chỗ (Tốn RAM và CPU lúc khởi động)
+        """
+        print("💾 [HF RAG] Đang tải dataset và xây dựng FAISS index mới...")
+        dataset = load_dataset(self.HF_REPO_ID, split="train")
+        
+        # Chuẩn bị vectors
+        vectors = np.array(dataset['embedding']).astype("float32")
+        
+        # Chuẩn bị metadata (loại bỏ cột embedding để nhẹ RAM)
+        self.metadata = [{k: v for k, v in item.items() if k != 'embedding'} for item in dataset]
+        
+        # Build Index
+        d = vectors.shape[1]
+        self.index = faiss.IndexFlatL2(d)
+        self.index.add(vectors)
+        
+        print(f"🔨 [HF RAG] Đã build xong index. Số lượng vector: {self.index.ntotal}")
+        
+        # Mẹo: Ở đây bạn có thể lưu file ra đĩa và upload ngược lên HF để lần sau dùng cách 1
 
     def search(self, query: str, k: int = 2) -> List[Dict[str, Any]]:
+        # Encode câu hỏi
         query_vec = self.model.encode([query], convert_to_numpy=True).astype("float32")
-        _, indices = self.index.search(query_vec, k)
-        results = [{"metadata": self.metadata[int(idx)]} for idx in indices[0]]
+        
+        # Search FAISS
+        distances, indices = self.index.search(query_vec, k)
+        
+        # Map kết quả
+        results = []
+        for i, idx in enumerate(indices[0]):
+            if idx != -1: # Kiểm tra nếu tìm thấy
+                item = {
+                    "score": float(distances[0][i]), # Distance càng nhỏ càng giống (với L2)
+                    "metadata": self.metadata[int(idx)]
+                }
+                results.append(item)
+                
         return results
-
 # ==============================================================================
 # HỆ THỐNG RAG 2: SỬ DỤNG LOCAL DISK DATASET
 # ==============================================================================
